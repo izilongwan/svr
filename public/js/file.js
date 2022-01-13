@@ -1,0 +1,1 @@
+!function(n,e){var o;function s(n){console.log("🚀 ~ file: index.js ~ line 8 ~ wsOnOpen ~ e",n),this.send(JSON.stringify({msg:"hi"}))}function i(n){console.log("🚀 ~ file: index.js ~ line 13 ~ wsOnMessage ~ e",n.data)}(function(n){n.onmessage=i,n.onopen=s})(o=new n("ws://localhost:3003")),e.ws=o}(WebSocket,window);
