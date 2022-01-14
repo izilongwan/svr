@@ -3,15 +3,19 @@ const router = require('koa-router')(),
         aboutRoute,
         noLayoutRoute,
         notFoundRoute,
+
+        UploadFile,
         upload,
         merge, } = require('../controllers')
+
+const uploadFile = new UploadFile()
 
 router
   .get('/home', homeRoute)
   .get('/about', aboutRoute)
   .get('/no-layout', noLayoutRoute)
   .get('/(.*)', notFoundRoute)
-  .post('/api/upload', upload)
-  .post('/api/merge', merge)
+  .post('/api/upload', uploadFile.upload.bind(uploadFile))
+  .post('/api/merge', uploadFile.merge.bind(uploadFile))
 
 module.exports = router;

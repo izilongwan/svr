@@ -4,6 +4,7 @@ const noLayoutRoute = require('./noLayoutRoute')
 const notFoundRoute = require('./notFoundRoute')
 const upload        = require('./upload')
 const merge         = require('./merge')
+const UploadFile         = require('./UploadFile')
 
 module.exports = {
   homeRoute,
@@ -13,4 +14,5 @@ module.exports = {
 
   upload,
   merge,
+  UploadFile,
 }
