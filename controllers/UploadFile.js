@@ -1,6 +1,6 @@
 const path = require('path')
 const multiparty = require('multiparty')
-const { fsSyncCatch: fs } = require('../extends')
+const { fsSyncCatch: fs, CODE } = require('../extends')
 
 class UploadFile {
   constructor (
@@ -9,6 +9,82 @@ class UploadFile {
   ) {
     this.ABSOLUTE_UPLOAD_DIR = ABSOLUTE_UPLOAD_DIR;
     this.uploadDir = uploadDir;
+  }
+
+  getFileInfo(fields, file) {
+    const [index] = fields.index || []
+    const [hash] = fields.hash || []
+    const [total] = fields.total || []
+    const [{ path: pathname = '', size }] = file.file || []
+    const [, ext] = pathname.split('.')
+
+    const filename = `${ hash }.${ ext }`
+
+    return {
+      index,
+      hash,
+      total,
+      size,
+      ext,
+      oldFilename: pathname,
+      filename,
+    }
+  }
+
+  checkFileState (ctx) {
+    const { ABSOLUTE_UPLOAD_DIR } = this
+    const { hash = '', ext = '' } = ctx.request.body
+
+    const filename = path.resolve(ABSOLUTE_UPLOAD_DIR, `${ hash }.${ ext }`)
+    const [err, isExistFile] = fs.existsSyncCatch(filename)
+    // console.log('🚀 ~ filename', filename)
+
+    if (err) {
+      return CODE.CHECK_PATHNAME_ERROR
+    }
+
+    // 文件存在
+    if (isExistFile) {
+      const url = `${ ctx.host }/${ hash }.${ ext }`
+
+      ctx.body = {
+        ...CODE.SUCCESS,
+        data: {
+          is_exist: isExistFile,
+          url,
+        }
+      }
+      return
+    }
+
+    // 文件不存在
+    const dirname = path.resolve(ABSOLUTE_UPLOAD_DIR, hash)
+    console.log('🚀 ~ dirname', dirname)
+    const [err1, isExistDir] = fs.existsSyncCatch(dirname)
+
+    if (err1) {
+      return CODE.CHECK_PATHNAME_ERROR
+    }
+
+    const chunks = []
+
+    if (isExistDir) {
+      const [err2, dirList] = fs.readdirSyncCatch(dirname)
+
+      if (err2) {
+        ctx.body = CODE.READ_DIR_ERROR
+        return
+      }
+
+      Object.assign(chunks, dirList.map(file => file.split('.')[0])).sort((a, b) => a - b)
+    }
+
+    ctx.body = {
+      ...CODE.SUCCESS,
+      data: {
+        chunks,
+      }
+    }
   }
 
   async upload (ctx) {
@@ -40,26 +116,6 @@ class UploadFile {
     ctx.body = ret
   }
 
-  getFileInfo(fields, file) {
-    const [index] = fields.index || []
-    const [hash] = fields.hash || []
-    const [total] = fields.total || []
-    const [{ path: pathname = '', size }] = file.file || []
-    const [, ext] = pathname.split('.')
-
-    const filename = `${ hash }.${ ext }`
-
-    return {
-      index,
-      hash,
-      total,
-      size,
-      ext,
-      oldFilename: pathname,
-      filename,
-    }
-  }
-
   async sliceUpload(fields, file, ABSOLUTE_UPLOAD_DIR) {
     const { index, hash, ext, oldFilename } = this.getFileInfo(fields, file)
     const oldName = path.resolve(__dirname, `../${ oldFilename }`)
@@ -69,10 +125,7 @@ class UploadFile {
     const [err0, isExist] = fs.existsSyncCatch(chunkDir)
 
     if (err0) {
-      return {
-        code: -1,
-        message: 'Check File exists failed',
-      }
+      return CODE.CHECK_PATHNAME_ERROR
     }
 
     // console.log('🚀 ~ isExist', isExist, path, chunkDir)
@@ -80,26 +133,17 @@ class UploadFile {
       const [err1] = fs.mkdirSyncCatch(chunkDir);
 
       if (err1) {
-        return {
-          code: -1,
-          message: 'Make dir failed',
-        }
+        return CODE.MAKE_DIR_ERROR
       }
     }
     // console.log(oldName, nowName);
     const [err2] = fs.renameSyncCatch(oldName, nowName)
 
     if (err2) {
-      return {
-        code: -1,
-        message: 'Rename file failed',
-      }
+      return CODE.RENAME_FILE_ERROR
     }
 
-    return {
-      code: 0,
-      message: 'Slice file upload success',
-    }
+    return CODE.SUCCESS
   }
 
   async commonUpload(fields, file, ABSOLUTE_UPLOAD_DIR, ctx) {
@@ -110,20 +154,16 @@ class UploadFile {
     const [err0] = fs.renameSyncCatch(oldName, nowName)
 
     if (err0) {
-      return {
-        code: -1,
-        message: 'Rename file failed',
-      }
+      return CODE.RENAME_FILE_ERROR
     }
 
     const url = `${ ctx.host }/${filename}`
 
     return {
-      code: 0,
+      ...CODE.SUCCESS,
       data: {
         url,
       },
-      message: 'file upload success',
     }
   }
 
@@ -145,16 +185,23 @@ class UploadFile {
   pipeStream (path, writeStream) {
     return new Promise((resolve, reject) => {
       try {
-        const readStream = fs.createReadStream(path);
+        const readStream = fs.createReadStream(path)
+
         readStream.on('end', async () => {
-          const [err] = fs.unlinkSyncCatch(path);
+          const [err] = fs.unlinkSyncCatch(path)
 
           if (err) {
             reject(err)
           }
-          resolve(path);
+          resolve(path)
         });
-        readStream.pipe(writeStream);
+
+        try {
+          readStream.pipe(writeStream)
+        } catch (error) {
+          console.log(error)
+        }
+
       } catch (error) {
         reject(error)
       }
@@ -168,10 +215,7 @@ class UploadFile {
     const [err0, chunkPaths] = fs.readdirSyncCatch(chunkDir);
 
     if (err0) {
-      return {
-        code: -1,
-        message: 'Read dir failed',
-      }
+      return CODE.READ_DIR_ERROR
     }
 
     const len = chunkPaths.length
@@ -197,18 +241,14 @@ class UploadFile {
     const [err1] = fs.rmdirSyncCatch(chunkDir); // 合并后删除保存切片的目录
 
     if (err1) {
-      return {
-        code: -1,
-        message: 'Remove file failed',
-      }
+      return CODE.RENAME_FILE_ERROR
     }
 
     return {
-      code: 0,
+      ...CODE.SUCCESS,
       data: {
         url,
       },
-      message: 'file merged success',
     }
   }
 }
