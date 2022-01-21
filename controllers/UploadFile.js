@@ -1,6 +1,8 @@
 const path = require('path')
 const multiparty = require('multiparty')
-const { fsSyncCatch: fs, CODE } = require('../extends')
+const { fsSyncCatch: fs, CODE, getQiniuTokenWithName, getQiniuMacConfig } = require('../extends')
+const Qiniu = require('qiniu')
+const { HOST, QINIU_CONFIG } = require('../config')
 
 class UploadFile {
   constructor (
@@ -11,7 +13,7 @@ class UploadFile {
     this.uploadDir = uploadDir;
   }
 
-  getFileInfo(fields, file) {
+  getFileInfo (fields, file) {
     const [index] = fields.index || []
     const [hash] = fields.hash || []
     const [total] = fields.total || []
@@ -116,7 +118,7 @@ class UploadFile {
     ctx.body = ret
   }
 
-  async sliceUpload(fields, file, ABSOLUTE_UPLOAD_DIR) {
+  async sliceUpload (fields, file, ABSOLUTE_UPLOAD_DIR) {
     const { index, hash, ext, oldFilename } = this.getFileInfo(fields, file)
     const oldName = path.resolve(__dirname, `../${ oldFilename }`)
     const nowName = path.resolve(ABSOLUTE_UPLOAD_DIR, `${ hash }/${ index }.${ ext }`)
@@ -146,7 +148,7 @@ class UploadFile {
     return CODE.SUCCESS
   }
 
-  async commonUpload(fields, file, ABSOLUTE_UPLOAD_DIR, ctx) {
+  async commonUpload (fields, file, ABSOLUTE_UPLOAD_DIR, ctx) {
     const { oldFilename, filename } = this.getFileInfo(fields, file)
     const oldName = path.resolve(__dirname, `../${ oldFilename }`)
     const nowName = path.resolve(ABSOLUTE_UPLOAD_DIR, filename)
@@ -157,7 +159,7 @@ class UploadFile {
       return CODE.RENAME_FILE_ERROR
     }
 
-    const url = `${ ctx.host }/${filename}`
+    const url = `${ ctx.host }/${ filename }`
 
     return {
       ...CODE.SUCCESS,
@@ -250,6 +252,121 @@ class UploadFile {
         url,
       },
     }
+  }
+
+  async uploadToQiniuSpace (filename, localFilename) {
+    const uploadToken = getQiniuTokenWithName(filename)  // 生成token这个方法调用了好多次
+    const { config } = getQiniuMacConfig  // 根据你的上传空间选择zone对象
+    const formUploader = new Qiniu.form_up.FormUploader(config)
+    // console.log('🚀 ~ config', config)
+    const putExtra = new Qiniu.form_up.PutExtra()
+    // console.log('🚀 ~ putExtra', putExtra)
+
+    return await new Promise((resolve, reject) => {
+      formUploader.putFile(uploadToken, filename, localFilename, putExtra, (respErr,
+        respBody, respInfo) => {
+        if (respErr) {
+          reject([true, respErr])
+        }
+
+        if (respInfo.statusCode == 200) {
+          resolve([false, respBody])
+
+        } else {
+          console.log(respInfo.statusCode);
+          resolve([false, respBody])
+        }
+      })
+    })
+  }
+
+  async uploadToQiniu (ctx) {
+    const { params: { hash } = { hash: '' } } = ctx.request
+
+    // const [err0, ret0] = await this.checkQiniuSpaceState(hash)
+    // console.log('🚀 ~ ret0', ret0)
+
+    // if (err0) {
+    //   const message = err0.message || CODE.ERROR.message
+    //   ctx.body = {
+    //     ...CODE.ERROR,
+    //     message,
+    //   }
+    //   return
+    // }
+
+    if (!hash) {
+      ctx.body = CODE.FILE_NOT_FOUND
+
+      return
+    }
+
+    const localFilename = path.resolve(this.ABSOLUTE_UPLOAD_DIR, hash)
+
+    const [err, isExistFile] = fs.existsSyncCatch(localFilename)
+
+    if (err) {
+      ctx.body = CODE.CHECK_PATHNAME_ERROR
+      return
+    }
+
+    if (!isExistFile) {
+      ctx.body = CODE.FILE_NOT_FOUND
+      return
+    }
+
+    const [err1, data] = await this.uploadToQiniuSpace(hash, localFilename)
+
+    if (err1) {
+      const message = err1.message || CODE.ERROR.message
+      ctx.body = {
+        ...CODE.ERROR,
+        message,
+      }
+      return
+    }
+
+    Object.assign(data, { url: `upload.${ HOST }/${ data.key }` })
+
+    ctx.body = {
+      ...CODE.SUCCESS,
+      data,
+    }
+  }
+
+  async checkQiniuSpaceState (hash) {
+    const { mac, config } = getQiniuMacConfig
+    const bucketManager = new Qiniu.rs.BucketManager(mac, config)
+    const bucket = QINIU_CONFIG.bucket['upload-imgs']
+
+    return await new Promise((resolve, reject) => {
+      let hasError = true
+      let data = null
+
+      bucketManager.stat(bucket, hash, function (err, respBody, respInfo) {
+        try {
+          if (err) {
+            data = err
+            //throw err;
+          } else {
+            if (respInfo.statusCode == 200) {
+              hasError = false
+            }
+            data = respBody
+          }
+
+        } catch (error) {
+          data = error
+
+        } finally {
+          const ret = [hasError, data]
+
+          !hasError
+            ? resolve(ret)
+            : reject(ret)
+        }
+      })
+    })
   }
 }
 

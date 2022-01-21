@@ -9,7 +9,7 @@ const Koa               = require('koa'),
       path              = require('path')
       // socket            = require('./socket')
 
-const { cors } = require('./middleware');
+const { cors, catchError } = require('./middleware');
 
 const app = new Koa();
 
@@ -20,8 +20,8 @@ koaEjs(app, {
   viewExt: 'ejs'
 })
 
-
 app
+  .use(catchError)
   .use(cors)
   .use(body({ enableTypes: ['json', 'form', 'text'] }))
   .use(koaConditionalGet())

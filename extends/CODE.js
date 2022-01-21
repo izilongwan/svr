@@ -19,8 +19,18 @@ module.exports = {
     message: 'Read directory error',
   },
 
+  FILE_NOT_FOUND: {
+    code: 10005,
+    message: 'File not found',
+  },
+
   SUCCESS: {
     code: 0,
     message: 'Success',
+  },
+
+  ERROR: {
+    code: -1,
+    message: 'Error',
   }
 }
