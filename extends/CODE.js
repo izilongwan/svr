@@ -24,6 +24,11 @@ module.exports = {
     message: 'File not found',
   },
 
+  FILE_REMOVE_ERROR: {
+    code: 10006,
+    message: 'File remove error',
+  },
+
   SUCCESS: {
     code: 0,
     message: 'Success',
@@ -31,6 +36,6 @@ module.exports = {
 
   ERROR: {
     code: -1,
-    message: 'Error',
+    message: 'Server error',
   }
 }

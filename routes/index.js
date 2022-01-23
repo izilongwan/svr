@@ -14,7 +14,7 @@ router
   .post('/api/upload', uploadFile.upload.bind(uploadFile))
   .post('/api/merge', uploadFile.merge.bind(uploadFile))
   .post('/api/check_file_state', uploadFile.checkFileState.bind(uploadFile))
-  .get('/api/upload_to_qiniu/:hash', uploadFile.uploadToQiniu.bind(uploadFile))
+  .post('/api/upload_to_qiniu', uploadFile.uploadToQiniu.bind(uploadFile))
   .get('/(.*)', notFoundRoute)
 
 module.exports = router;

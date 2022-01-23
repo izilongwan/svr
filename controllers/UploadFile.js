@@ -61,7 +61,6 @@ class UploadFile {
 
     // 文件不存在
     const dirname = path.resolve(ABSOLUTE_UPLOAD_DIR, hash)
-    console.log('🚀 ~ dirname', dirname)
     const [err1, isExistDir] = fs.existsSyncCatch(dirname)
 
     if (err1) {
@@ -281,27 +280,14 @@ class UploadFile {
   }
 
   async uploadToQiniu (ctx) {
-    const { params: { hash } = { hash: '' } } = ctx.request
+    const { filename = '' } = ctx.request.body
 
-    // const [err0, ret0] = await this.checkQiniuSpaceState(hash)
-    // console.log('🚀 ~ ret0', ret0)
-
-    // if (err0) {
-    //   const message = err0.message || CODE.ERROR.message
-    //   ctx.body = {
-    //     ...CODE.ERROR,
-    //     message,
-    //   }
-    //   return
-    // }
-
-    if (!hash) {
+    if (!filename) {
       ctx.body = CODE.FILE_NOT_FOUND
-
       return
     }
 
-    const localFilename = path.resolve(this.ABSOLUTE_UPLOAD_DIR, hash)
+    const localFilename = path.resolve(this.ABSOLUTE_UPLOAD_DIR, filename)
 
     const [err, isExistFile] = fs.existsSyncCatch(localFilename)
 
@@ -315,14 +301,21 @@ class UploadFile {
       return
     }
 
-    const [err1, data] = await this.uploadToQiniuSpace(hash, localFilename)
+    const [err1, data] = await this.uploadToQiniuSpace(filename, localFilename)
 
     if (err1) {
-      const message = err1.message || CODE.ERROR.message
+      const error = err1
       ctx.body = {
         ...CODE.ERROR,
-        message,
+        error,
       }
+      return
+    }
+
+    const [err3, ret3] = fs.unlinkSyncCatch(localFilename)
+
+    if (err3) {
+      ctx.body = CODE.FILE_REMOVE_ERROR
       return
     }
 
@@ -334,7 +327,7 @@ class UploadFile {
     }
   }
 
-  async checkQiniuSpaceState (hash) {
+  async checkQiniuSpaceState (filename) {
     const { mac, config } = getQiniuMacConfig
     const bucketManager = new Qiniu.rs.BucketManager(mac, config)
     const bucket = QINIU_CONFIG.bucket['upload-imgs']
@@ -343,7 +336,7 @@ class UploadFile {
       let hasError = true
       let data = null
 
-      bucketManager.stat(bucket, hash, function (err, respBody, respInfo) {
+      bucketManager.stat(bucket, filename, function (err, respBody, respInfo) {
         try {
           if (err) {
             data = err
