@@ -40,6 +40,7 @@ app
   .use(koaStatic(resolve(__dirname + '/public')))
   .use(koaStatic(resolve(__dirname + '/static')))
   .use(koaStatic(resolve(__dirname + '/upload')))
+  .use(koaStatic(resolve(__dirname + '/temp')))
   .use(routes.routes(), routes.allowedMethods())
 
 

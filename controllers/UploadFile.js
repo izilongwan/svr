@@ -1,6 +1,12 @@
 const path = require('path')
 const multiparty = require('multiparty')
-const { fsSyncCatch: fs, CODE, getQiniuTokenWithName, getQiniuMacConfig } = require('../extends')
+const {
+  fsSyncCatch: fs,
+  CODE,
+  getQiniuTokenWithName,
+  getQiniuMacConfig,
+  sliceVideo
+} = require('../extends')
 const Qiniu = require('qiniu')
 const { HOST, QINIU_CONFIG } = require('../config')
 
@@ -174,19 +180,33 @@ class UploadFile {
     const { hash, size, ext, total, chunk_size, } = body;
     const chunkDir = path.resolve(ABSOLUTE_UPLOAD_DIR, `${ hash }`);
     const filePath = path.resolve(ABSOLUTE_UPLOAD_DIR, `${ hash }.${ ext }`);
+    const targetPath = `${ chunkDir }/${ hash }.${ ext }`
+    const url = `${ host }/${ hash }/${ hash }.${ ext === 'mp4' ? 'm3u8' : ext }`
 
-    if (fs.existsSync(`${ chunkDir }/${ hash }.${ ext }`)) {
+    if (fs.existsSync(targetPath)) {
       ctx.body = {
         ...CODE.SUCCESS,
         data: {
-          url: `${ host }/${ hash }/${ hash }.${ ext }`,
+          url,
         }
       }
       return
     }
 
-    const url = `${ host }/${ hash }/${ hash }.${ ext }`
     const ret = await this.mergeFileChunk({ ext, filePath, hash, size, chunk_size, url, total, host });
+
+    if (ext === 'mp4') {
+      await this.sliceVideo(targetPath, `${ chunkDir }/${ hash }.m3u8`)
+
+      ctx.body = {
+        ...CODE.SUCCESS,
+        data: {
+          url: `${ ctx.host }/${ hash }/${ hash }.m3u8`
+        }
+      }
+
+      return
+    }
 
     ctx.body = ret
   }
@@ -218,6 +238,21 @@ class UploadFile {
     });
   }
 
+
+  sliceVideo(path, hashPath) {
+    return new Promise(resolve => {
+      sliceVideo(path, {
+        output: hashPath,
+        onEnd() {
+          resolve()
+        },
+        onError(e) {
+          console.log(e)
+        }
+      })
+    })
+  }
+
   // 合并切片
   async mergeFileChunk ({ ext, filePath, hash, size, chunk_size, url }) {
     const { ABSOLUTE_UPLOAD_DIR } = this
@@ -232,8 +267,8 @@ class UploadFile {
 
     // 根据切片下标进行排序
     // 否则直接读取目录的获得的顺序可能会错乱
-    chunkPaths.sort((a, b) => a - b);
-    chunkPaths.forEach((chunkPath) => {
+    const o = chunkPaths.filter(o => Number(o) >= 0).sort((a, b) => a - b);
+    o.forEach((chunkPath) => {
       const cp = `${ chunkDir }/${ chunkPath }`
       const mp4Path = `${ chunkDir }/${ hash }.${ ext }`
       const [_, content] = fs.readFileSyncCatch(cp)
@@ -280,7 +315,7 @@ class UploadFile {
   }
 
   async uploadToQiniu (ctx) {
-    const { filename = '', ext = '', hash = '', removeLocalFile = true } = ctx.request.body
+    const { filename = '', ext = '', hash = '', removeLocalFile = false } = ctx.request.body
 
     if (!filename) {
       ctx.body = CODE.FILE_NOT_FOUND
