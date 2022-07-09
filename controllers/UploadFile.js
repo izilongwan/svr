@@ -20,7 +20,7 @@ class UploadFile {
     const [{ path: pathname = '', size }] = file.file || []
     const [, ext] = pathname.split('.')
 
-    const filename = `${ hash }.${ ext }`
+    const filename = `${ hash }`
 
     return {
       index,
@@ -120,7 +120,7 @@ class UploadFile {
   async sliceUpload (fields, file, ABSOLUTE_UPLOAD_DIR) {
     const { index, hash, ext, oldFilename } = this.getFileInfo(fields, file)
     const oldName = path.resolve(__dirname, `../${ oldFilename }`)
-    const nowName = path.resolve(ABSOLUTE_UPLOAD_DIR, `${ hash }/${ index }.${ ext }`)
+    const nowName = path.resolve(ABSOLUTE_UPLOAD_DIR, `${ hash }/${ index }`)
     const chunkDir = path.resolve(ABSOLUTE_UPLOAD_DIR, `${ hash }`)
 
     const [err0, isExist] = fs.existsSyncCatch(chunkDir)
@@ -170,14 +170,23 @@ class UploadFile {
 
   async merge (ctx) {
     const { ABSOLUTE_UPLOAD_DIR } = this
-
     const { body, host } = ctx.request
     const { hash, size, ext, total, chunk_size, } = body;
-
+    const chunkDir = path.resolve(ABSOLUTE_UPLOAD_DIR, `${ hash }`);
     const filePath = path.resolve(ABSOLUTE_UPLOAD_DIR, `${ hash }.${ ext }`);
 
-    const url = `${ host }/${ hash }.${ ext }`
-    const ret = await this.mergeFileChunk({ filePath, hash, size, chunk_size, url, total, });
+    if (fs.existsSync(`${ chunkDir }/${ hash }.${ ext }`)) {
+      ctx.body = {
+        ...CODE.SUCCESS,
+        data: {
+          url: `${ host }/${ hash }/${ hash }.${ ext }`,
+        }
+      }
+      return
+    }
+
+    const url = `${ host }/${ hash }/${ hash }.${ ext }`
+    const ret = await this.mergeFileChunk({ ext, filePath, hash, size, chunk_size, url, total, host });
 
     ctx.body = ret
   }
@@ -210,40 +219,31 @@ class UploadFile {
   }
 
   // 合并切片
-  async mergeFileChunk ({ filePath, hash, size, chunk_size, url }) {
+  async mergeFileChunk ({ ext, filePath, hash, size, chunk_size, url }) {
     const { ABSOLUTE_UPLOAD_DIR } = this
-    const chunkDir = path.resolve(ABSOLUTE_UPLOAD_DIR, hash);
+    const chunkDir = path.resolve(ABSOLUTE_UPLOAD_DIR, `${ hash }`);
     const [err0, chunkPaths] = fs.readdirSyncCatch(chunkDir);
 
     if (err0) {
       return CODE.READ_DIR_ERROR
     }
 
-    const len = chunkPaths.length
+    // const len = chunkPaths.length
 
     // 根据切片下标进行排序
     // 否则直接读取目录的获得的顺序可能会错乱
-    chunkPaths.sort((a, b) => a.split('.')[0] - b.split('.')[0]);
-    console.log('🚀 ~ chunkPaths', chunkPaths, size)
+    chunkPaths.sort((a, b) => a - b);
+    chunkPaths.forEach((chunkPath) => {
+      const cp = `${ chunkDir }/${ chunkPath }`
+      const mp4Path = `${ chunkDir }/${ hash }.${ ext }`
+      const [_, content] = fs.readFileSyncCatch(cp)
 
-    const ret = await Promise.all(
-      chunkPaths.map((chunkPath, index) =>
-        this.pipeStream(
-          path.resolve(chunkDir, chunkPath),
-          // 指定位置创建可写流
-          fs.createWriteStream(filePath, {
-            start: index * chunk_size,
-            end: (index === len - 1 ? size : (index + 1) * chunk_size),
-          })
-        )
-      )
-    );
+      !fs.existsSyncCatch(mp4Path)
+        ? fs.writeFileSyncCatch(mp4Path, content)
+        : fs.appendFileSyncCatch(mp4Path, content)
 
-    const [err1] = fs.rmdirSyncCatch(chunkDir); // 合并后删除保存切片的目录
-
-    if (err1) {
-      return CODE.RENAME_FILE_ERROR
-    }
+      fs.unlinkSyncCatch(cp)
+    })
 
     return {
       ...CODE.SUCCESS,
@@ -280,14 +280,14 @@ class UploadFile {
   }
 
   async uploadToQiniu (ctx) {
-    const { filename = '' } = ctx.request.body
+    const { filename = '', ext = '', hash = '', removeLocalFile = true } = ctx.request.body
 
     if (!filename) {
       ctx.body = CODE.FILE_NOT_FOUND
       return
     }
 
-    const localFilename = path.resolve(this.ABSOLUTE_UPLOAD_DIR, filename)
+    const localFilename = path.resolve(this.ABSOLUTE_UPLOAD_DIR, `${ hash }/${ hash }.${ ext }`)
 
     const [err, isExistFile] = fs.existsSyncCatch(localFilename)
 
@@ -312,12 +312,15 @@ class UploadFile {
       return
     }
 
-    const [err3, ret3] = fs.unlinkSyncCatch(localFilename)
+    if (removeLocalFile) {
+      const [err3, ret3] = fs.unlinkSyncCatch(localFilename)
 
-    if (err3) {
-      ctx.body = CODE.FILE_REMOVE_ERROR
-      return
+      if (err3) {
+        ctx.body = CODE.FILE_REMOVE_ERROR
+        return
+      }
     }
+
 
     Object.assign(data, { url: `upload.${ HOST }/${ data.key }` })
 
